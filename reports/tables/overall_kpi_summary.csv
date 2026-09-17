@@ -1,0 +1,26 @@
+metric,value
+Delivered Orders,96478.0
+Delivered Items,110197.0
+GMV,13221498.11
+Average Merchandise Value per Order,137.0415857501192
+Average Items per Order,1.1421982213561641
+Total Freight Value,2198275.64
+Overall Freight Burden Percentage,16.62652463216213
+Average Delivery Duration (Days),12.558217098051976
+Early Delivery Rate (%),91.88763346117965
+On-Time Delivery Rate (%),1.3392764590027988
+Late Delivery Rate (%),6.7730900798175595
+On or Before Estimate Rate (%),93.22690992018245
+Missing Delivery Status Orders,8.0
+Reviewed Orders,95832.0
+Review Coverage Rate (%),99.33041729720765
+Average Review Score,4.156186520855942
+Low Review Score Orders,12237.0
+Low Review Score Rate (%),12.769221136989731
+Review Response Over 30 Days Orders,645.0
+Review Response Over 30 Days Rate (%),0.6731
+Orders Without Payment Records,1.0
+Missing Payment Record Rate (%),0.00104
+Average Maximum Payment Installments,2.928024295946184
+Payment Quality Exception Orders,82.0
+Payment Quality Exception Rate (%),0.08499435098520891

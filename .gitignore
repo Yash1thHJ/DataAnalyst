@@ -9,3 +9,6 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+# Local datasets and generated analysis-ready files
+data/raw/
+data/processed/
