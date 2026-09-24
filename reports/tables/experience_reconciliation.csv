@@ -1,0 +1,5 @@
+table_name,valid_delivery_order_count,late_order_count,delivery_duration_total_days,reviewed_order_count,review_score_total,review_response_over_30_days_order_count
+analysis_ready_master,96470,6534,1211491.2034490742,95832,398295.6666666667,645
+regional_performance,96470,6534,1211491.2034490742,95832,398295.6666666667,645
+customer_performance,96470,6534,1211491.2034490742,95832,398295.6666666666,645
+customer_type_comparison,96470,6534,1211491.2034490742,95832,398295.6666666667,645

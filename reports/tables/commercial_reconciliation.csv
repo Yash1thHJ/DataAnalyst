@@ -1,0 +1,5 @@
+table_name,delivered_order_count,delivered_item_count,gmv,freight_value
+analysis_ready_master,96478,110197,13221498.11,2198275.64
+regional_performance,96478,110197,13221498.110000001,2198275.64
+customer_performance,96478,110197,13221498.11,2198275.6399999997
+customer_type_comparison,96478,110197,13221498.11,2198275.64
