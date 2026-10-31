@@ -266,3 +266,95 @@ Dominant-payment-method findings:
 - SQL and Python counts, totals, averages, and payment-value
   shares reconciled within the documented tolerances.
 */
+
+-- Inspect credit-card installment coverage for delivered orders.
+SELECT COUNT(pay.order_id) AS credit_card_payment_record_count,
+COUNT(CASE WHEN pay.payment_installments IS NULL THEN ord.order_id END) AS missing_installment_count,
+COUNT(CASE WHEN pay.payment_installments < 1 THEN ord.order_id END) AS invalid_installment_count,
+COUNT(CASE WHEN pay.payment_installments >= 1 THEN ord.order_id END) AS valid_installment_count
+FROM orders ord 
+JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE pay.payment_type = 'credit_card' AND ord.order_status='delivered';
+
+-- Classify valid delivered-order credit-card payments into installment groups.
+SELECT ord.order_id, pay.payment_sequential, pay.payment_installments, pay.payment_value,
+(CASE WHEN pay.payment_installments = 1 THEN 'Single installment'
+         WHEN pay.payment_installments BETWEEN 2 AND 3 THEN '2–3 installments'
+         WHEN pay.payment_installments BETWEEN 4 AND 6 THEN '4–6 installments'
+         WHEN pay.payment_installments BETWEEN 7 AND 12 THEN '7–12 installments'
+         WHEN pay.payment_installments BETWEEN 13 AND 24 THEN '13–24 installments'
+ END) AS installment_group
+FROM orders ord 
+JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE pay.payment_type = 'credit_card' AND ord.order_status='delivered' AND pay.payment_installments >= 1
+ORDER BY ord.order_id, pay.payment_sequential;
+
+-- Summarize valid credit-card payments and record shares by installment group.
+;WITH classified_installments AS (SELECT ord.order_id, pay.payment_sequential, pay.payment_installments, pay.payment_value,
+(CASE WHEN pay.payment_installments = 1 THEN 'Single installment'
+         WHEN pay.payment_installments BETWEEN 2 AND 3 THEN '2–3 installments'
+         WHEN pay.payment_installments BETWEEN 4 AND 6 THEN '4–6 installments'
+         WHEN pay.payment_installments BETWEEN 7 AND 12 THEN '7–12 installments'
+         WHEN pay.payment_installments BETWEEN 13 AND 24 THEN '13–24 installments'
+ END) AS installment_group
+FROM orders ord 
+JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE pay.payment_type = 'credit_card' AND ord.order_status='delivered' AND pay.payment_installments >= 1)
+
+SELECT installment_group,
+COUNT(*) AS payment_record_count,
+SUM(payment_value) AS total_payment_value,
+AVG(payment_value) AS average_payment_value,
+COUNT(*) * 100.0/ NULLIF(SUM(COUNT(*)) OVER (), 0) AS payment_record_share_pct
+FROM classified_installments
+GROUP BY installment_group
+ORDER BY MIN(payment_installments);
+
+-- Summarize valid credit-card payments by installment group, including counts, totals, averages, shares, and medians.
+;WITH classified_installments AS (SELECT ord.order_id, pay.payment_sequential, pay.payment_installments, pay.payment_value,
+(CASE WHEN pay.payment_installments = 1 THEN 'Single installment'
+         WHEN pay.payment_installments BETWEEN 2 AND 3 THEN '2–3 installments'
+         WHEN pay.payment_installments BETWEEN 4 AND 6 THEN '4–6 installments'
+         WHEN pay.payment_installments BETWEEN 7 AND 12 THEN '7–12 installments'
+         WHEN pay.payment_installments BETWEEN 13 AND 24 THEN '13–24 installments'
+ END) AS installment_group
+FROM orders ord 
+JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE pay.payment_type = 'credit_card' AND ord.order_status='delivered' AND pay.payment_installments >= 1),
+
+installment_medians AS (SELECT *,
+PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY payment_value) OVER (PARTITION BY installment_group) AS median_payment_value
+FROM classified_installments)
+
+SELECT installment_group, 
+COUNT(*) AS payment_record_count,
+SUM(payment_value) AS total_payment_value,
+AVG(payment_value) AS average_payment_value,
+COUNT(*) * 100.0/ NULLIF(SUM(COUNT(*)) OVER (), 0) AS payment_record_share_pct,
+MAX(median_payment_value) AS median_payment_value
+FROM installment_medians
+GROUP BY installment_group
+ORDER BY MIN(payment_installments);
+
+/*
+Credit-card installment analysis — findings and validation
+
+Scope:
+- 74,584 valid credit-card payment records from delivered orders.
+- Two zero-installment records excluded.
+- Counts represent payment records, not unique orders.
+
+Findings:
+- Single-installment payments: 24,759 records (33.20%).
+- Payments using 2–3 installments: 22,239 records (29.82%).
+- Median payment value increased across installment groups:
+  R$67.74 for single installments to R$252.09 for 13–24 installments.
+- The 13–24 installment group contained 179 records (0.24%).
+- These patterns describe an association, not causation.
+
+SQL–Python reconciliation:
+- All five installment groups matched.
+- Payment-record counts matched exactly.
+- Payment totals, averages, and medians differed by less than R$0.01.
+- Payment-record shares differed by less than 0.00001 percentage points.
+*/

@@ -1,0 +1,6 @@
+﻿installment_group,payment_record_count,total_payment_value,average_payment_value,payment_record_share_pct,median_payment_value
+Single installment,24759,2366960.73,95.600013,33.196127855840,67.74
+2–3 installments,22239,2971869.74,133.633245,29.817387107154,109.89
+4–6 installments,15790,2849773.90,180.479664,21.170760484822,127.01
+7–12 installments,11617,3838346.31,330.407705,15.575726697414,204.41
+13–24 installments,179,73955.57,413.159608,0.239997854767,252.09
