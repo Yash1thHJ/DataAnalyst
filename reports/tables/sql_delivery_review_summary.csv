@@ -1,0 +1,5 @@
+﻿delivery_status,order_count,reviewed_order_count,missing_review_order_count,mean_order_review_score,review_coverage_pct,low_review_order_count,low_review_rate_pct
+early,88644,88163,481,4.294292,99.457380082126,8100,9.187527647652
+late,6534,6381,153,2.271822,97.658402203856,3979,62.356997335840
+missing,8,8,0,4.500000,100.000000000000,1,12.500000000000
+on_time,1292,1280,12,4.035546,99.071207430340,157,12.265625000000
