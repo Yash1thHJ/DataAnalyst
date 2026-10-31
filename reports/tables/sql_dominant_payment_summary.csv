@@ -1,0 +1,5 @@
+﻿dominant_payment_type,order_count,total_payment_value,average_payment_value_per_order,payment_value_share_pct
+credit_card,72785,12095049.25,166.175025,78.424893
+boleto,19191,2769932.58,144.334978,17.960378
+voucher,3017,349108.82,115.713894,2.263638
+debit_card,1484,208371.12,140.411805,1.351088
