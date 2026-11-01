@@ -633,3 +633,94 @@ SQL–Python validation:
 - Signed and absolute difference totals differed by less than R$0.01.
 - Missing values matched between SQL and Python.
 */
+
+-- Classify delivered orders into merchandise-value bands matching Python.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id)
+
+SELECT *, 
+(CASE WHEN order_merchandise_value > 0 AND order_merchandise_value <= 50 THEN '0-50'
+        WHEN order_merchandise_value > 50 AND order_merchandise_value <= 100 THEN '50-100'
+        WHEN order_merchandise_value > 100 AND order_merchandise_value <= 150 THEN '100-150'
+        WHEN order_merchandise_value > 150 AND order_merchandise_value <= 400 THEN '150-400'
+        WHEN order_merchandise_value > 400 AND order_merchandise_value <= 1000 THEN '400-1000'
+        WHEN order_merchandise_value > 1000 THEN '1000+'
+        END) AS order_value_band
+FROM order_commercial_summary
+ORDER BY order_id
+
+-- Validate order uniqueness and merchandise-value-band coverage.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+classified_order_values AS (SELECT *, 
+(CASE WHEN order_merchandise_value > 0 AND order_merchandise_value <= 50 THEN '0-50'
+        WHEN order_merchandise_value > 50 AND order_merchandise_value <= 100 THEN '50-100'
+        WHEN order_merchandise_value > 100 AND order_merchandise_value <= 150 THEN '100-150'
+        WHEN order_merchandise_value > 150 AND order_merchandise_value <= 400 THEN '150-400'
+        WHEN order_merchandise_value > 400 AND order_merchandise_value <= 1000 THEN '400-1000'
+        WHEN order_merchandise_value > 1000 THEN '1000+'
+        END) AS order_value_band
+FROM order_commercial_summary)
+
+SELECT COUNT(*) AS order_count,
+COUNT(DISTINCT order_id) AS distinct_order_count,
+COUNT(CASE WHEN order_value_band IS NULL THEN 1 END) AS missing_order_value_band_count,
+COUNT(DISTINCT order_value_band) AS distinct_order_value_band_count
+FROM classified_order_values;
+
+-- Summarize delivered-order counts, merchandise values, and their percentage shares by order-value band.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+classified_order_values AS (SELECT *, 
+(CASE WHEN order_merchandise_value > 0 AND order_merchandise_value <= 50 THEN '0-50'
+        WHEN order_merchandise_value > 50 AND order_merchandise_value <= 100 THEN '50-100'
+        WHEN order_merchandise_value > 100 AND order_merchandise_value <= 150 THEN '100-150'
+        WHEN order_merchandise_value > 150 AND order_merchandise_value <= 400 THEN '150-400'
+        WHEN order_merchandise_value > 400 AND order_merchandise_value <= 1000 THEN '400-1000'
+        WHEN order_merchandise_value > 1000 THEN '1000+'
+        END) AS order_value_band
+FROM order_commercial_summary)
+
+SELECT order_value_band,
+COUNT(*) AS order_count,
+SUM(order_merchandise_value) AS total_merchandise_value,
+AVG(order_merchandise_value) AS average_merchandise_value,
+COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER (), 0) AS order_share_pct,
+SUM(order_merchandise_value) * 100.0 / NULLIF(SUM(SUM(order_merchandise_value)) OVER (), 0) AS merchandise_value_share_pct
+FROM classified_order_values
+GROUP BY order_value_band
+ORDER BY MIN(order_merchandise_value);
+
+/*
+Order-value-band findings and SQL–Python reconciliation:
+- All six bands matched, covering 96,478 delivered orders.
+- Total merchandise value: R$13,221,498.11.
+- Order counts matched exactly.
+- Merchandise totals and averages differed by less than R$0.01.
+- Order and merchandise-value shares differed by less than
+  0.00001 percentage points.
+- Orders worth R$100 or less represented 58.72% of orders
+  and 22.86% of merchandise value.
+- The R$150–400 band contributed the largest merchandise-value
+  share at 32.79%.
+*/
