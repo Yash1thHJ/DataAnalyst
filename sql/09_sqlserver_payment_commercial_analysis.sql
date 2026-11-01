@@ -724,3 +724,124 @@ Order-value-band findings and SQL–Python reconciliation:
 - The R$150–400 band contributed the largest merchandise-value
   share at 32.79%.
 */
+
+-- Freight-burden analysis.
+
+-- Calculate freight as a percentage of merchandise value for each delivered order.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id)
+
+SELECT *,
+(order_freight_value * 100.0 / NULLIF(order_merchandise_value, 0)) AS freight_burden_pct
+FROM order_commercial_summary
+
+-- Classify delivered orders into freight-burden bands matching Python.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_freight_burden AS (SELECT *,
+(order_freight_value * 100.0 / NULLIF(order_merchandise_value, 0)) AS freight_burden_pct
+FROM order_commercial_summary)
+
+SELECT *,
+(CASE WHEN freight_burden_pct = 0 THEN 'Zero freight'
+     WHEN freight_burden_pct > 0 AND freight_burden_pct <= 10 THEN '0-10%'
+     WHEN freight_burden_pct > 10 AND freight_burden_pct <= 25 THEN '10-25%'
+     WHEN freight_burden_pct > 25 AND freight_burden_pct <= 50 THEN '25-50%'
+     WHEN freight_burden_pct > 50 AND freight_burden_pct <= 100 THEN '50-100%'
+     WHEN freight_burden_pct > 100 THEN 'Above 100%'
+     ELSE 'unclassified'
+     END) AS freight_burden_band
+FROM order_freight_burden
+ORDER BY order_id
+
+-- Validate order uniqueness and freight-burden classification coverage.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_freight_burden AS (SELECT *,
+(order_freight_value * 100.0 / NULLIF(order_merchandise_value, 0)) AS freight_burden_pct
+FROM order_commercial_summary),
+
+classified_freight_burden AS (SELECT *,
+(CASE WHEN freight_burden_pct = 0 THEN 'Zero freight'
+     WHEN freight_burden_pct > 0 AND freight_burden_pct <= 10 THEN '0-10%'
+     WHEN freight_burden_pct > 10 AND freight_burden_pct <= 25 THEN '10-25%'
+     WHEN freight_burden_pct > 25 AND freight_burden_pct <= 50 THEN '25-50%'
+     WHEN freight_burden_pct > 50 AND freight_burden_pct <= 100 THEN '50-100%'
+     WHEN freight_burden_pct > 100 THEN 'Above 100%'
+     ELSE 'unclassified'
+     END) AS freight_burden_band
+FROM order_freight_burden)
+
+SELECT COUNT(*) AS order_count, 
+COUNT(DISTINCT(order_id)) AS distinct_order_count,
+COUNT(CASE WHEN freight_burden_pct IS NULL THEN 1 END) AS missing_freight_burden_count,
+COUNT(CASE WHEN freight_burden_band = 'unclassified' THEN 1 END) AS unclassified_order_count,
+COUNT(DISTINCT(freight_burden_band)) AS distinct_freight_band_count
+FROM classified_freight_burden
+
+-- Summarize delivered-order counts, freight values, and average freight burden by band.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_freight_burden AS (SELECT *,
+(order_freight_value * 100.0 / NULLIF(order_merchandise_value, 0)) AS freight_burden_pct
+FROM order_commercial_summary),
+
+classified_freight_burden AS (SELECT *,
+(CASE WHEN freight_burden_pct = 0 THEN 'Zero freight'
+     WHEN freight_burden_pct > 0 AND freight_burden_pct <= 10 THEN '0-10%'
+     WHEN freight_burden_pct > 10 AND freight_burden_pct <= 25 THEN '10-25%'
+     WHEN freight_burden_pct > 25 AND freight_burden_pct <= 50 THEN '25-50%'
+     WHEN freight_burden_pct > 50 AND freight_burden_pct <= 100 THEN '50-100%'
+     WHEN freight_burden_pct > 100 THEN 'Above 100%'
+     ELSE 'unclassified'
+     END) AS freight_burden_band
+FROM order_freight_burden)
+
+SELECT freight_burden_band, COUNT(order_id) AS order_count,
+SUM(order_merchandise_value) AS total_merchandise_value,
+SUM(order_freight_value) AS total_freight_value,
+AVG(freight_burden_pct) AS average_freight_burden_pct,
+(COUNT(order_id) * 100.0/ NULLIF(SUM(COUNT(order_id)) OVER (), 0)) AS order_share_pct
+FROM classified_freight_burden
+GROUP BY freight_burden_band
+ORDER BY MIN(freight_burden_pct)
+
+/*
+Freight-burden findings and SQL–Python reconciliation:
+- All six bands matched across 96,478 delivered orders.
+- Order counts matched exactly.
+- Merchandise and freight totals differed by less than R$0.01.
+- Average freight burden and order shares differed by less than
+  0.00001 percentage points.
+- The >10% to 25% band contained 39.56% of orders.
+- Freight exceeded merchandise value for 3,075 orders (3.19%).
+- Zero freight was recorded for 336 orders (0.35%).
+- Average freight burden is the mean of individual order percentages.
+*/
