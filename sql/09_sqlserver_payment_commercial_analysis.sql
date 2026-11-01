@@ -845,3 +845,109 @@ Freight-burden findings and SQL–Python reconciliation:
 - Zero freight was recorded for 336 orders (0.35%).
 - Average freight burden is the mean of individual order percentages.
 */
+
+-- Commercial segment identification.
+
+-- Summarize observed combinations of merchandise-value and freight-burden bands.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_freight_burden AS (SELECT *,
+(order_freight_value * 100.0 / NULLIF(order_merchandise_value, 0)) AS freight_burden_pct
+FROM order_commercial_summary),
+
+classified_freight_burden AS (SELECT *,
+(CASE WHEN freight_burden_pct = 0 THEN 'Zero freight'
+     WHEN freight_burden_pct > 0 AND freight_burden_pct <= 10 THEN '0-10%'
+     WHEN freight_burden_pct > 10 AND freight_burden_pct <= 25 THEN '10-25%'
+     WHEN freight_burden_pct > 25 AND freight_burden_pct <= 50 THEN '25-50%'
+     WHEN freight_burden_pct > 50 AND freight_burden_pct <= 100 THEN '50-100%'
+     WHEN freight_burden_pct > 100 THEN 'Above 100%'
+     ELSE 'unclassified'
+     END) AS freight_burden_band,
+     (CASE WHEN order_merchandise_value > 0 AND order_merchandise_value <= 50 THEN '0-50'
+        WHEN order_merchandise_value > 50 AND order_merchandise_value <= 100 THEN '50-100'
+        WHEN order_merchandise_value > 100 AND order_merchandise_value <= 150 THEN '100-150'
+        WHEN order_merchandise_value > 150 AND order_merchandise_value <= 400 THEN '150-400'
+        WHEN order_merchandise_value > 400 AND order_merchandise_value <= 1000 THEN '400-1000'
+        WHEN order_merchandise_value > 1000 THEN '1000+'
+        END) AS order_value_band
+FROM order_freight_burden)
+
+SELECT order_value_band, 
+freight_burden_band, 
+COUNT(DISTINCT(order_id)) AS order_count,
+SUM(order_merchandise_value) AS merchandise_gmv,
+SUM(order_freight_value) AS total_freight_value
+FROM classified_freight_burden
+GROUP BY order_value_band, freight_burden_band
+ORDER BY merchandise_gmv DESC
+
+-- Validate commercial-segment counts and monetary totals.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_freight_burden AS (SELECT *,
+(order_freight_value * 100.0 / NULLIF(order_merchandise_value, 0)) AS freight_burden_pct
+FROM order_commercial_summary),
+
+classified_freight_burden AS (SELECT *,
+(CASE WHEN freight_burden_pct = 0 THEN 'Zero freight'
+     WHEN freight_burden_pct > 0 AND freight_burden_pct <= 10 THEN '0-10%'
+     WHEN freight_burden_pct > 10 AND freight_burden_pct <= 25 THEN '10-25%'
+     WHEN freight_burden_pct > 25 AND freight_burden_pct <= 50 THEN '25-50%'
+     WHEN freight_burden_pct > 50 AND freight_burden_pct <= 100 THEN '50-100%'
+     WHEN freight_burden_pct > 100 THEN 'Above 100%'
+     ELSE 'unclassified'
+     END) AS freight_burden_band,
+     (CASE WHEN order_merchandise_value > 0 AND order_merchandise_value <= 50 THEN '0-50'
+        WHEN order_merchandise_value > 50 AND order_merchandise_value <= 100 THEN '50-100'
+        WHEN order_merchandise_value > 100 AND order_merchandise_value <= 150 THEN '100-150'
+        WHEN order_merchandise_value > 150 AND order_merchandise_value <= 400 THEN '150-400'
+        WHEN order_merchandise_value > 400 AND order_merchandise_value <= 1000 THEN '400-1000'
+        WHEN order_merchandise_value > 1000 THEN '1000+'
+        END) AS order_value_band
+FROM order_freight_burden),
+
+commercial_segment_summary AS (SELECT order_value_band, 
+freight_burden_band, 
+COUNT(DISTINCT(order_id)) AS order_count,
+SUM(order_merchandise_value) AS merchandise_gmv,
+SUM(order_freight_value) AS total_freight_value
+FROM classified_freight_burden
+GROUP BY order_value_band, freight_burden_band)
+
+SELECT COUNT(*) AS segment_count, 
+SUM(order_count) AS total_order_count,
+SUM(merchandise_gmv) AS total_merchandise_value,
+SUM(total_freight_value) AS total_freight_value
+FROM commercial_segment_summary
+
+/*
+Commercial-segment findings and SQL–Python reconciliation:
+- All 33 observed band combinations matched.
+- No duplicate or unmatched combinations were found.
+- Order counts matched exactly.
+- Merchandise and freight totals differed by less than R$0.01
+  for every segment.
+- Total coverage: 96,478 delivered orders.
+- Total merchandise value: R$13,221,498.11.
+- Total freight value: R$2,198,275.64.
+- The largest segment by merchandise value was >R$150 to R$400
+  with >0% to 10% freight burden: 8,679 orders and
+  R$2,166,289.99 in merchandise value.
+- These segments describe commercial characteristics,
+  not profitability.
+*/
