@@ -1,0 +1,5 @@
+﻿payment_reconciliation_status,order_count,order_share_pct,total_payment_difference,total_absolute_payment_difference
+matched,95908,99.409191732830,0.00,0.00
+missing_payment,1,0.001036505731,NULL,NULL
+payment_above_expected,362,0.375215074939,3032.24,3032.24
+payment_below_expected,207,0.214556686498,-200.76,200.76

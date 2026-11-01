@@ -358,3 +358,278 @@ SQL–Python reconciliation:
 - Payment totals, averages, and medians differed by less than R$0.01.
 - Payment-record shares differed by less than 0.00001 percentage points.
 */
+
+-- Payment-value reconciliation against merchandise and freight.
+
+-- Aggregate merchandise and freight values to one row per delivered order.
+SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id
+ORDER BY ord.order_id;
+
+-- Validate delivered-order merchandise, freight, and expected-value totals.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id)
+
+SELECT COUNT(*) AS order_count,
+COUNT(DISTINCT order_id) AS distinct_order_count,
+SUM(order_merchandise_value) AS total_merchandise_value,
+SUM(order_freight_value) AS total_freight_value,
+SUM(expected_order_value) AS total_expected_order_value
+FROM order_commercial_summary;
+
+-- Combine delivered-order commercial values with separately aggregated payment totals.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT order_id, 
+SUM(payment_value) AS total_payment_value
+FROM payments
+GROUP BY order_id)
+
+SELECT ocs.order_id,
+ocs.order_merchandise_value,
+ocs.order_freight_value,
+ocs.expected_order_value,
+ops.total_payment_value
+FROM order_commercial_summary AS ocs
+LEFT JOIN order_payment_summary AS ops ON ocs.order_id = ops.order_id
+ORDER BY ocs.order_id;
+
+-- Validate order uniqueness and payment coverage after joining commercial and payment summaries.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT order_id, 
+SUM(payment_value) AS total_payment_value
+FROM payments
+GROUP BY order_id),
+
+order_payment_reconciliation  AS (SELECT ocs.order_id,
+ocs.order_merchandise_value,
+ocs.order_freight_value,
+ocs.expected_order_value,
+ops.total_payment_value
+FROM order_commercial_summary AS ocs
+LEFT JOIN order_payment_summary AS ops ON ocs.order_id = ops.order_id)
+
+SELECT
+COUNT(*) AS order_count,
+COUNT(DISTINCT order_id) AS distinct_order_count,
+COUNT(total_payment_value) AS orders_with_payment,
+COUNT(CASE WHEN total_payment_value IS NULL THEN 1 END) AS orders_without_payment
+FROM order_payment_reconciliation;
+
+-- Calculate the difference between total payment value and expected order value.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT order_id, 
+SUM(payment_value) AS total_payment_value
+FROM payments
+GROUP BY order_id),
+
+order_payment_reconciliation  AS (SELECT ocs.order_id,
+ocs.order_merchandise_value,
+ocs.order_freight_value,
+ocs.expected_order_value,
+ops.total_payment_value
+FROM order_commercial_summary AS ocs
+LEFT JOIN order_payment_summary AS ops ON ocs.order_id = ops.order_id)
+
+SELECT *,
+total_payment_value - expected_order_value AS payment_difference, 
+ABS(total_payment_value - expected_order_value) AS absolute_payment_difference
+FROM order_payment_reconciliation
+ORDER BY order_id;
+
+-- Inspect delivered orders with the largest absolute payment differences.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT order_id, 
+SUM(payment_value) AS total_payment_value
+FROM payments
+GROUP BY order_id),
+
+order_payment_reconciliation  AS (SELECT ocs.order_id,
+ocs.order_merchandise_value,
+ocs.order_freight_value,
+ocs.expected_order_value,
+ops.total_payment_value
+FROM order_commercial_summary AS ocs
+LEFT JOIN order_payment_summary AS ops ON ocs.order_id = ops.order_id)
+
+SELECT TOP 10 *,
+total_payment_value - expected_order_value AS payment_difference,
+ABS(total_payment_value - expected_order_value)
+AS absolute_payment_difference
+FROM order_payment_reconciliation
+ORDER BY absolute_payment_difference DESC, order_id ASC;
+
+-- Inspect the delivered order with missing payment data.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT order_id, 
+SUM(payment_value) AS total_payment_value
+FROM payments
+GROUP BY order_id),
+
+order_payment_reconciliation  AS (SELECT ocs.order_id,
+ocs.order_merchandise_value,
+ocs.order_freight_value,
+ocs.expected_order_value,
+ops.total_payment_value
+FROM order_commercial_summary AS ocs
+LEFT JOIN order_payment_summary AS ops ON ocs.order_id = ops.order_id)
+
+SELECT *
+FROM order_payment_reconciliation
+WHERE total_payment_value IS NULL;
+
+-- Classify delivered-order payment reconciliation results using differences rounded to cents.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT order_id, 
+SUM(payment_value) AS total_payment_value
+FROM payments
+GROUP BY order_id),
+
+order_payment_reconciliation  AS (SELECT ocs.order_id,
+ocs.order_merchandise_value,
+ocs.order_freight_value,
+ocs.expected_order_value,
+ops.total_payment_value
+FROM order_commercial_summary AS ocs
+LEFT JOIN order_payment_summary AS ops ON ocs.order_id = ops.order_id)
+
+SELECT *,
+total_payment_value - expected_order_value AS payment_difference,
+ABS(total_payment_value - expected_order_value) AS absolute_payment_difference,
+CASE WHEN total_payment_value IS NULL THEN 'missing_payment'
+     WHEN ROUND(total_payment_value - expected_order_value, 2) = 0 THEN 'matched'
+     WHEN ROUND(total_payment_value - expected_order_value, 2) > 0 THEN 'payment_above_expected'
+     WHEN ROUND(total_payment_value - expected_order_value, 2) < 0 THEN 'payment_below_expected'
+     ELSE 'unclassified'
+END AS payment_reconciliation_status
+FROM order_payment_reconciliation
+ORDER BY order_id;
+
+-- Summarize delivered-order payment reconciliation by status.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT order_id, 
+SUM(payment_value) AS total_payment_value
+FROM payments
+GROUP BY order_id),
+
+order_payment_reconciliation  AS (SELECT ocs.order_id,
+ocs.order_merchandise_value,
+ocs.order_freight_value,
+ocs.expected_order_value,
+ops.total_payment_value
+FROM order_commercial_summary AS ocs
+LEFT JOIN order_payment_summary AS ops ON ocs.order_id = ops.order_id),
+
+classified_payments  AS (SELECT *,
+total_payment_value - expected_order_value AS payment_difference,
+ABS(total_payment_value - expected_order_value) AS absolute_payment_difference,
+CASE WHEN total_payment_value IS NULL THEN 'missing_payment'
+     WHEN ROUND(total_payment_value - expected_order_value, 2) = 0 THEN 'matched'
+     WHEN ROUND(total_payment_value - expected_order_value, 2) > 0 THEN 'payment_above_expected'
+     WHEN ROUND(total_payment_value - expected_order_value, 2) < 0 THEN 'payment_below_expected'
+     ELSE 'unclassified'
+END AS payment_reconciliation_status
+FROM order_payment_reconciliation)
+
+SELECT payment_reconciliation_status,
+COUNT(*) AS order_count,
+COUNT(*) * 100.0/ NULLIF(SUM(COUNT(*)) OVER (), 0) AS order_share_pct,
+SUM(payment_difference) AS total_payment_difference,
+SUM(absolute_payment_difference) AS total_absolute_payment_difference
+FROM classified_payments
+GROUP BY payment_reconciliation_status
+ORDER BY payment_reconciliation_status;
+
+/*
+Payment-value reconciliation — findings and validation
+
+Scope:
+- 96,478 delivered orders retained, with one row per order.
+- Merchandise and freight were aggregated separately from payments.
+- Classification uses payment differences rounded to two decimal places.
+
+Findings:
+- 95,908 orders (99.41%) matched merchandise plus freight.
+- 362 orders had payments above expected value:
+  combined positive differences of R$3,032.24.
+- 207 orders had payments below expected value:
+  combined shortfalls of R$200.76.
+- 569 orders had discrepancies, with total absolute differences
+  of R$3,233.00.
+- One order had missing payment data and expected value R$143.46.
+  Its payment total and differences remain NULL.
+- These differences do not establish their underlying cause.
+
+SQL–Python validation:
+- All four statuses matched, with exact order counts.
+- Order shares differed by less than 0.00001 percentage points.
+- Signed and absolute difference totals differed by less than R$0.01.
+- Missing values matched between SQL and Python.
+*/
