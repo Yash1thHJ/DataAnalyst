@@ -653,7 +653,7 @@ SELECT *,
         WHEN order_merchandise_value > 1000 THEN '1000+'
         END) AS order_value_band
 FROM order_commercial_summary
-ORDER BY order_id
+ORDER BY order_id;
 
 -- Validate order uniqueness and merchandise-value-band coverage.
 ;WITH order_commercial_summary AS (SELECT ord.order_id,
@@ -739,7 +739,7 @@ GROUP BY ord.order_id)
 
 SELECT *,
 (order_freight_value * 100.0 / NULLIF(order_merchandise_value, 0)) AS freight_burden_pct
-FROM order_commercial_summary
+FROM order_commercial_summary;
 
 -- Classify delivered orders into freight-burden bands matching Python.
 ;WITH order_commercial_summary AS (SELECT ord.order_id,
@@ -765,7 +765,7 @@ SELECT *,
      ELSE 'unclassified'
      END) AS freight_burden_band
 FROM order_freight_burden
-ORDER BY order_id
+ORDER BY order_id;
 
 -- Validate order uniqueness and freight-burden classification coverage.
 ;WITH order_commercial_summary AS (SELECT ord.order_id,
@@ -797,7 +797,7 @@ COUNT(DISTINCT(order_id)) AS distinct_order_count,
 COUNT(CASE WHEN freight_burden_pct IS NULL THEN 1 END) AS missing_freight_burden_count,
 COUNT(CASE WHEN freight_burden_band = 'unclassified' THEN 1 END) AS unclassified_order_count,
 COUNT(DISTINCT(freight_burden_band)) AS distinct_freight_band_count
-FROM classified_freight_burden
+FROM classified_freight_burden;
 
 -- Summarize delivered-order counts, freight values, and average freight burden by band.
 ;WITH order_commercial_summary AS (SELECT ord.order_id,
@@ -831,7 +831,7 @@ AVG(freight_burden_pct) AS average_freight_burden_pct,
 (COUNT(order_id) * 100.0/ NULLIF(SUM(COUNT(order_id)) OVER (), 0)) AS order_share_pct
 FROM classified_freight_burden
 GROUP BY freight_burden_band
-ORDER BY MIN(freight_burden_pct)
+ORDER BY MIN(freight_burden_pct);
 
 /*
 Freight-burden findings and SQL–Python reconciliation:
@@ -887,7 +887,7 @@ SUM(order_merchandise_value) AS merchandise_gmv,
 SUM(order_freight_value) AS total_freight_value
 FROM classified_freight_burden
 GROUP BY order_value_band, freight_burden_band
-ORDER BY merchandise_gmv DESC
+ORDER BY merchandise_gmv DESC;
 
 -- Validate commercial-segment counts and monetary totals.
 ;WITH order_commercial_summary AS (SELECT ord.order_id,
@@ -933,7 +933,7 @@ SELECT COUNT(*) AS segment_count,
 SUM(order_count) AS total_order_count,
 SUM(merchandise_gmv) AS total_merchandise_value,
 SUM(total_freight_value) AS total_freight_value
-FROM commercial_segment_summary
+FROM commercial_segment_summary;
 
 /*
 Commercial-segment findings and SQL–Python reconciliation:
@@ -950,4 +950,792 @@ Commercial-segment findings and SQL–Python reconciliation:
   R$2,166,289.99 in merchandise value.
 - These segments describe commercial characteristics,
   not profitability.
+*/
+
+-- Payment-method commercial and customer-experience comparisons.
+
+-- Prepare average review scores at one row per order.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id)
+
+SELECT
+order_id,
+average_review_score
+FROM order_review_summary
+ORDER BY order_id;
+
+-- Attach order-level average review scores to delivered orders, retaining delivery dates and orders without reviews.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id)
+
+SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered';
+
+-- Validate delivered-order uniqueness and review-score coverage.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered')
+
+SELECT COUNT(*) AS order_count, COUNT(DISTINCT(order_id)) AS distinct_order_count,
+COUNT(CASE WHEN average_review_score IS NULL THEN 1 END) AS missing_review_count,
+COUNT(CASE WHEN average_review_score IS NOT NULL THEN 1 END) AS available_review_count
+FROM delivered_order_experience;
+
+-- Calculate elapsed delivery duration in days for each delivered order.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered')
+
+SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days
+FROM delivered_order_experience;
+
+-- Validate delivery-duration coverage and check for negative elapsed durations.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days
+FROM delivered_order_experience)
+
+SELECT COUNT(*) AS order_count,
+COUNT(CASE WHEN delivery_duration_days IS NULL THEN 1 END) AS missing_delivery_duration_count,
+COUNT(CASE WHEN delivery_duration_days IS NOT NULL THEN 1 END) AS available_delivery_duration_count,
+COUNT(CASE WHEN delivery_duration_days < 0 THEN 1 END) AS negative_delivery_duration_count
+FROM order_delivery_measures;
+
+-- Calculate the calendar-day difference between actual and estimated delivery dates.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days
+FROM delivered_order_experience)
+
+SELECT *,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM order_delivery_measures;
+
+-- Classify delivered orders as early, on time, late, or missing delivery dates.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience)
+
+SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures;
+
+-- Validate delivery-status counts across all delivered orders.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures)
+
+SELECT delivery_status, COUNT(*) AS order_count 
+FROM classified_order_experience
+GROUP BY delivery_status;
+
+-- Define review and delivery eligibility flags for each delivered order.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures)
+
+SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience
+ORDER BY order_id;
+
+-- Validate eligible order counts for reviews, delivery duration, and delivery status.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures),
+
+order_experience_eligibility AS(SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience)
+
+SELECT
+COUNT(*) AS order_count,
+SUM(flag_review_eligible) AS review_eligible_order_count,
+SUM(flag_delivery_duration_eligible) AS delivery_duration_eligible_order_count,
+SUM(flag_delivery_status_eligible) AS delivery_status_eligible_order_count,
+COUNT(CASE WHEN flag_delivery_status_eligible = 1 AND delivery_status = 'late' THEN 1 END) AS late_order_count
+FROM order_experience_eligibility;
+
+-- Create eligible review and delivery measures for each delivered order.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures),
+
+order_experience_eligibility AS(SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience)
+
+SELECT *,
+    CASE
+        WHEN flag_review_eligible = 1 THEN average_review_score
+        ELSE NULL
+    END AS eligible_review_score,
+    CASE
+        WHEN flag_delivery_duration_eligible = 1 THEN delivery_duration_days
+        ELSE NULL
+    END AS eligible_delivery_duration_days,
+    CASE
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status = 'late' THEN 1
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status IN ('early', 'on_time') THEN 0
+        ELSE NULL
+    END AS eligible_late_indicator
+FROM order_experience_eligibility
+ORDER BY order_id;
+
+-- Validate eligible review scores, delivery durations, and late indicators across delivered orders.
+;WITH order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures),
+
+order_experience_eligibility AS(SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience),
+
+eligible_order_experience AS (SELECT *,
+    CASE
+        WHEN flag_review_eligible = 1 THEN average_review_score
+        ELSE NULL
+    END AS eligible_review_score,
+    CASE
+        WHEN flag_delivery_duration_eligible = 1 THEN delivery_duration_days
+        ELSE NULL
+    END AS eligible_delivery_duration_days,
+    CASE
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status = 'late' THEN 1
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status IN ('early', 'on_time') THEN 0
+        ELSE NULL
+    END AS eligible_late_indicator
+FROM order_experience_eligibility)
+
+SELECT COUNT(order_id) AS order_count, 
+COUNT(CASE WHEN eligible_review_score IS NOT NULL THEN 1 END) AS review_eligible_order_count,
+COUNT(CASE WHEN eligible_delivery_duration_days IS NOT NULL THEN 1 END) AS delivery_duration_eligible_order_count,
+COUNT(CASE WHEN eligible_late_indicator = 1 THEN 1 END) AS late_order_count,
+COUNT(CASE WHEN eligible_late_indicator = 0 THEN 1 END) AS not_late_order_count,
+COUNT(CASE WHEN eligible_late_indicator IS NULL THEN 1 END) AS missing_delivery_status_count
+FROM eligible_order_experience;
+
+-- Join delivered orders to their dominant payment method and validate order uniqueness, review coverage, and delivery coverage.
+;WITH order_payment_summary AS (SELECT ord.order_id,
+SUM(pay.payment_value) AS total_payment_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_type_summary AS (SELECT ord.order_id,
+pay.payment_type,
+SUM(pay.payment_value) AS payment_type_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id, pay.payment_type),
+
+payment_type_maxima AS (SELECT *,
+MAX(payment_type_value) OVER (PARTITION BY order_id) AS maximum_payment_type_value
+FROM order_payment_type_summary),
+
+order_payment_analysis AS (SELECT ops.order_id,
+ptm.payment_type AS dominant_payment_type,
+ops.total_payment_value
+FROM order_payment_summary AS ops
+INNER JOIN payment_type_maxima AS ptm
+ON ops.order_id = ptm.order_id
+WHERE ptm.payment_type_value = ptm.maximum_payment_type_value),
+order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures),
+
+order_experience_eligibility AS(SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience),
+
+eligible_order_experience AS (SELECT *,
+    CASE
+        WHEN flag_review_eligible = 1 THEN average_review_score
+        ELSE NULL
+    END AS eligible_review_score,
+    CASE
+        WHEN flag_delivery_duration_eligible = 1 THEN delivery_duration_days
+        ELSE NULL
+    END AS eligible_delivery_duration_days,
+    CASE
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status = 'late' THEN 1
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status IN ('early', 'on_time') THEN 0
+        ELSE NULL
+    END AS eligible_late_indicator
+FROM order_experience_eligibility),
+
+payment_method_comparison_scope AS (SELECT eoe.*, opa.dominant_payment_type FROM eligible_order_experience AS eoe
+INNER JOIN order_payment_analysis AS opa ON eoe.order_id = opa.order_id)
+
+SELECT COUNT(*) AS order_count,
+COUNT(DISTINCT(order_id)) AS distinct_order_count,
+COUNT(CASE WHEN eligible_review_score IS NOT NULL THEN 1 END) AS review_eligible_order_count,
+COUNT(CASE WHEN eligible_delivery_duration_days IS NOT NULL THEN 1 END) AS delivery_duration_eligible_order_count,
+COUNT(eligible_late_indicator) AS delivery_status_eligible_order_count
+FROM payment_method_comparison_scope;
+
+-- Join order-level merchandise and freight to the payment-method comparison and validate order counts and measure coverage.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT ord.order_id,
+SUM(pay.payment_value) AS total_payment_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_type_summary AS (SELECT ord.order_id,
+pay.payment_type,
+SUM(pay.payment_value) AS payment_type_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id, pay.payment_type),
+
+payment_type_maxima AS (SELECT *,
+MAX(payment_type_value) OVER (PARTITION BY order_id) AS maximum_payment_type_value
+FROM order_payment_type_summary),
+
+order_payment_analysis AS (SELECT ops.order_id,
+ptm.payment_type AS dominant_payment_type,
+ops.total_payment_value
+FROM order_payment_summary AS ops
+INNER JOIN payment_type_maxima AS ptm
+ON ops.order_id = ptm.order_id
+WHERE ptm.payment_type_value = ptm.maximum_payment_type_value),
+order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures),
+
+order_experience_eligibility AS(SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience),
+
+eligible_order_experience AS (SELECT *,
+    CASE
+        WHEN flag_review_eligible = 1 THEN average_review_score
+        ELSE NULL
+    END AS eligible_review_score,
+    CASE
+        WHEN flag_delivery_duration_eligible = 1 THEN delivery_duration_days
+        ELSE NULL
+    END AS eligible_delivery_duration_days,
+    CASE
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status = 'late' THEN 1
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status IN ('early', 'on_time') THEN 0
+        ELSE NULL
+    END AS eligible_late_indicator
+FROM order_experience_eligibility),
+
+payment_method_comparison_scope AS (SELECT eoe.*, opa.dominant_payment_type FROM eligible_order_experience AS eoe
+INNER JOIN order_payment_analysis AS opa ON eoe.order_id = opa.order_id),
+
+payment_method_commercial_scope AS (SELECT pmcs.*,
+ocs.order_merchandise_value,
+ocs.order_freight_value * 100.0 / NULLIF(ocs.order_merchandise_value, 0) AS freight_burden_pct
+FROM payment_method_comparison_scope AS pmcs
+INNER JOIN order_commercial_summary AS ocs ON pmcs.order_id = ocs.order_id)
+
+SELECT COUNT(* ) AS order_count,
+COUNT(DISTINCT(order_id)) AS distinct_order_count,
+COUNT(CASE WHEN order_merchandise_value IS NULL THEN 1 END) AS missing_merchandise_value_count,
+COUNT(CASE WHEN freight_burden_pct IS NULL THEN 1 END) AS missing_freight_burden_count
+FROM payment_method_commercial_scope;
+
+-- Calculate median merchandise value and median freight burden by dominant payment method.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT ord.order_id,
+SUM(pay.payment_value) AS total_payment_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_type_summary AS (SELECT ord.order_id,
+pay.payment_type,
+SUM(pay.payment_value) AS payment_type_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id, pay.payment_type),
+
+payment_type_maxima AS (SELECT *,
+MAX(payment_type_value) OVER (PARTITION BY order_id) AS maximum_payment_type_value
+FROM order_payment_type_summary),
+
+order_payment_analysis AS (SELECT ops.order_id,
+ptm.payment_type AS dominant_payment_type,
+ops.total_payment_value
+FROM order_payment_summary AS ops
+INNER JOIN payment_type_maxima AS ptm
+ON ops.order_id = ptm.order_id
+WHERE ptm.payment_type_value = ptm.maximum_payment_type_value),
+order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures),
+
+order_experience_eligibility AS(SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience),
+
+eligible_order_experience AS (SELECT *,
+    CASE
+        WHEN flag_review_eligible = 1 THEN average_review_score
+        ELSE NULL
+    END AS eligible_review_score,
+    CASE
+        WHEN flag_delivery_duration_eligible = 1 THEN delivery_duration_days
+        ELSE NULL
+    END AS eligible_delivery_duration_days,
+    CASE
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status = 'late' THEN 1
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status IN ('early', 'on_time') THEN 0
+        ELSE NULL
+    END AS eligible_late_indicator
+FROM order_experience_eligibility),
+
+payment_method_comparison_scope AS (SELECT eoe.*, opa.dominant_payment_type FROM eligible_order_experience AS eoe
+INNER JOIN order_payment_analysis AS opa ON eoe.order_id = opa.order_id),
+
+payment_method_commercial_scope AS (SELECT pmcs.*,
+ocs.order_merchandise_value,
+ocs.order_freight_value * 100.0 / NULLIF(ocs.order_merchandise_value, 0) AS freight_burden_pct
+FROM payment_method_comparison_scope AS pmcs
+INNER JOIN order_commercial_summary AS ocs ON pmcs.order_id = ocs.order_id),
+payment_method_medians AS (SELECT pmcs.*,
+PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY order_merchandise_value) OVER (PARTITION BY dominant_payment_type) AS median_merchandise_value,
+PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY freight_burden_pct) OVER (PARTITION BY dominant_payment_type) AS median_freight_burden_pct
+FROM payment_method_commercial_scope AS pmcs)
+
+SELECT DISTINCT dominant_payment_type, 
+median_merchandise_value,
+median_freight_burden_pct
+FROM payment_method_medians
+ORDER BY dominant_payment_type;
+
+-- Summarize merchandise value, freight burden, review scores, and delivery performance by dominant payment method.
+;WITH order_commercial_summary AS (SELECT ord.order_id,
+SUM(ot.price) AS order_merchandise_value,
+SUM(ot.freight_value) AS order_freight_value,
+SUM(ot.price) + SUM(ot.freight_value) AS expected_order_value
+FROM orders AS ord
+JOIN order_items AS ot ON ord.order_id = ot.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_summary AS (SELECT ord.order_id,
+SUM(pay.payment_value) AS total_payment_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id),
+
+order_payment_type_summary AS (SELECT ord.order_id,
+pay.payment_type,
+SUM(pay.payment_value) AS payment_type_value
+FROM orders AS ord
+INNER JOIN payments AS pay ON ord.order_id = pay.order_id
+WHERE ord.order_status = 'delivered'
+GROUP BY ord.order_id, pay.payment_type),
+
+payment_type_maxima AS (SELECT *,
+MAX(payment_type_value) OVER (PARTITION BY order_id) AS maximum_payment_type_value
+FROM order_payment_type_summary),
+
+order_payment_analysis AS (SELECT ops.order_id,
+ptm.payment_type AS dominant_payment_type,
+ops.total_payment_value
+FROM order_payment_summary AS ops
+INNER JOIN payment_type_maxima AS ptm
+ON ops.order_id = ptm.order_id
+WHERE ptm.payment_type_value = ptm.maximum_payment_type_value),
+order_review_summary AS (
+SELECT
+order_id,
+AVG(CAST(review_score AS DECIMAL(10, 4))) AS average_review_score
+FROM reviews
+GROUP BY order_id),
+
+delivered_order_experience AS (SELECT ord.order_id, ors.average_review_score, ord.order_purchase_timestamp, ord.order_delivered_customer_date, ord.order_estimated_delivery_date
+FROM  orders ord 
+LEFT JOIN order_review_summary ors ON ord.order_id = ors.order_id 
+WHERE ord.order_status = 'delivered'),
+
+order_delivery_measures AS (SELECT *,
+DATEDIFF(SECOND, order_purchase_timestamp, order_delivered_customer_date)/86400.0 AS delivery_duration_days,
+DATEDIFF(DAY, order_estimated_delivery_date, order_delivered_customer_date) AS delivery_calendar_difference_days
+FROM delivered_order_experience),
+
+classified_order_experience AS (SELECT *,
+(CASE WHEN delivery_calendar_difference_days IS NULL THEN 'missing_delivery_dates'
+      WHEN delivery_calendar_difference_days < 0 THEN 'early'
+      WHEN delivery_calendar_difference_days = 0 THEN 'on_time'
+      WHEN delivery_calendar_difference_days > 0 THEN 'late'
+      END) AS delivery_status
+FROM order_delivery_measures),
+
+order_experience_eligibility AS(SELECT *,
+CASE WHEN average_review_score BETWEEN 1 AND 5 THEN 1 ELSE 0 END AS flag_review_eligible,
+CASE WHEN order_purchase_timestamp IS NOT NULL 
+          AND order_delivered_customer_date IS NOT NULL 
+          AND delivery_duration_days >= 0 THEN 1 ELSE 0 END AS flag_delivery_duration_eligible,
+CASE WHEN order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+          AND delivery_calendar_difference_days IS NOT NULL
+          AND delivery_status IN ('early', 'on_time', 'late') THEN 1 ELSE 0 END AS flag_delivery_status_eligible
+FROM classified_order_experience),
+
+eligible_order_experience AS (SELECT *,
+    CASE
+        WHEN flag_review_eligible = 1 THEN average_review_score
+        ELSE NULL
+    END AS eligible_review_score,
+    CASE
+        WHEN flag_delivery_duration_eligible = 1 THEN delivery_duration_days
+        ELSE NULL
+    END AS eligible_delivery_duration_days,
+    CASE
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status = 'late' THEN 1
+        WHEN flag_delivery_status_eligible = 1 AND delivery_status IN ('early', 'on_time') THEN 0
+        ELSE NULL
+    END AS eligible_late_indicator
+FROM order_experience_eligibility),
+
+payment_method_comparison_scope AS (SELECT eoe.*, opa.dominant_payment_type FROM eligible_order_experience AS eoe
+INNER JOIN order_payment_analysis AS opa ON eoe.order_id = opa.order_id),
+
+payment_method_commercial_scope AS (SELECT pmcs.*,
+ocs.order_merchandise_value,
+ocs.order_freight_value * 100.0 / NULLIF(ocs.order_merchandise_value, 0) AS freight_burden_pct
+FROM payment_method_comparison_scope AS pmcs
+INNER JOIN order_commercial_summary AS ocs ON pmcs.order_id = ocs.order_id),
+payment_method_medians AS (SELECT pmcs.*,
+PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY order_merchandise_value) OVER (PARTITION BY dominant_payment_type) AS median_merchandise_value,
+PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY freight_burden_pct) OVER (PARTITION BY dominant_payment_type) AS median_freight_burden_pct
+FROM payment_method_commercial_scope AS pmcs)
+
+SELECT dominant_payment_type,
+COUNT(*) AS order_count,
+AVG(order_merchandise_value) AS mean_merchandise_value,
+MAX(median_merchandise_value) AS median_merchandise_value,
+MAX(median_freight_burden_pct) AS median_freight_burden_pct,
+COUNT(eligible_review_score) AS review_eligible_order_count,
+AVG(eligible_review_score) AS mean_order_review_score,
+COUNT(eligible_delivery_duration_days) AS delivery_duration_eligible_order_count,
+AVG(eligible_delivery_duration_days) AS mean_delivery_duration_days,
+COUNT(eligible_late_indicator) AS delivery_status_eligible_order_count,
+SUM(eligible_late_indicator) AS late_order_count,
+SUM(eligible_late_indicator) * 100.0 / NULLIF(COUNT(eligible_late_indicator), 0) AS late_delivery_rate_pct
+FROM payment_method_medians
+GROUP BY dominant_payment_type
+ORDER BY dominant_payment_type;
+
+/*
+SQL–Python reconciliation: payment-method experience
+- All 11 measures passed validation across all four dominant payment methods.
+- The five count measures matched exactly, covering 96,477 delivered orders.
+- Mean and median merchandise values differed by less than R$0.01.
+- Median freight burden and late-delivery rates differed by less than 0.00001 percentage points.
+- Mean review scores differed by less than 0.00001 points; mean delivery durations differed by less than 0.00001 days.
+- Late-delivery rates use only orders with known delivery status: 6,533 late out of 96,469 eligible orders.
 */

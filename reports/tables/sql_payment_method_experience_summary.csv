@@ -1,0 +1,5 @@
+﻿dominant_payment_type,order_count,mean_merchandise_value,median_merchandise_value,median_freight_burden_pct,review_eligible_order_count,mean_order_review_score,delivery_duration_eligible_order_count,mean_delivery_duration_days,delivery_status_eligible_order_count,late_order_count,late_delivery_rate_pct
+boleto,19191,121.401054,74.9,25.282528,19062,4.156069,19191,13.4919497,19191,1405,7.321140117763
+credit_card,72785,143.235028,89.9,21.611111,72298,4.155658,72778,12.3499365,72778,4869,6.690208579515
+debit_card,1484,119.857452,70.45,24.9058895,1478,4.241880,1483,10.7886413,1483,79,5.327039784221
+voucher,3017,95.566947,59.99,27.398058,2993,4.128410,3017,12.4988874,3017,180,5.966191581040
