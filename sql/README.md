@@ -75,6 +75,11 @@ rather than accepted solely from the wizard's inferred types.
 | 01_sqlserver_database_setup.sql | Database setup |
 | 03_sqlserver_import_validation.sql | Imported structure, counts, keys, relationships, missing values, and monetary checks |
 | 04_sqlserver_database_constraints.sql | Customer-ID alignment, primary keys, foreign keys, and constraint verification |
+| 05_sqlserver_business_kpis.sql | Delivered-order business KPIs and monthly trends |
+| 06_sqlserver_category_product_analysis.sql | Category and product performance |
+| 07_sqlserver_regional_customer_analysis.sql | Regional performance and customer analysis |
+| 08_sqlserver_delivery_review_analysis.sql | Delivery performance and customer reviews |
+| 09_sqlserver_payment_commercial_analysis.sql | Payment methods, installments, reconciliation, order-value bands, and freight burden |
 
 Import the CSV files after database setup and before running import validation.
 
